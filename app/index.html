@@ -1,0 +1,189 @@
+<!DOCTYPE html>
+<html lang="pt-BR" data-theme="dark">
+
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  
+  <title>Datadog · Simulador de Métricas</title>
+  <link rel="icon" type="image/x-icon" href="./favicon.png">
+  
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&family=Open+Sans:ital,wght@0,300..800;1,300..800&display=swap" />
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
+  <link rel="stylesheet" href="style.css" />
+  
+  <script src="simulator.js" defer></script>
+</head>
+
+<body>
+  <div id="app">
+
+    <!-- HEADER -->
+    <header>
+      <div class="hdr-l">
+        <div class="hdr-logo"><img src="./favicon.png" alt="Datadog Custom Metrics Simulator Logo" /></div>
+        <span class="hdr-title">Datadog Metric Simulator</span>
+        <span class="hdr-sub">Cardinalidade · FinOps · Governança</span>
+      </div>
+      <div class="hdr-actions">
+        <button id="btnTheme" class="btn-theme" onclick="toggleTheme()" title="Alternar tema">
+          <i class="fa-solid fa-moon"></i>
+        </button>
+        <button class="btn-codegen" onclick="openCodeModal()">
+          <i class="fa-solid fa-code"></i> Gerar Código
+        </button>
+      </div>
+    </header>
+
+    <!-- MAIN: left | divider | right -->
+    <main>
+
+      <!-- LEFT PANEL: FORM (initial 1/3) -->
+      <aside class="panel-left" id="panelLeft">
+        <div class="panel-body">
+
+          <!-- Metric -->
+          <div class="form-section">
+            <div class="sec-label"><i class="fa-solid fa-chart-line fa-xs"></i> Métrica</div>
+            <div class="field" style="margin-bottom:7px">
+              <label>Nome</label>
+              <input type="text" id="metricName" value="app.ecommerce.checkout.latency"
+                placeholder="service.operation.metric" />
+            </div>
+            <div class="field">
+              <label>Tipo</label>
+              <select id="metricType" onchange="onMetricTypeChange()">
+                <option value="1" data-m="count">COUNT / RATE — 1×</option>
+                <option value="1" data-m="gauge">GAUGE — 1×</option>
+                <option value="1" data-m="set">SET — 1×</option>
+                <option value="5" data-m="histogram">HISTOGRAM — 5×</option>
+                <option value="5" data-m="distribution">DISTRIBUTION — 5×</option>
+                <option value="10" data-m="distribution">DISTRIBUTION + Percentis — 10×</option>
+              </select>
+            </div>
+            <div class="dist-info" id="distInfo" style="display:none">
+              <i class="fa-solid fa-circle-info fa-xs"></i>
+              <strong> Distributions:</strong> permitem remover o <code>host</code> do allowlist de indexação
+              via MwL — exclusivo deste tipo. Percentis (10×) aplicam-se a <strong>todas</strong> as tags indexadas.
+            </div>
+          </div>
+
+          <!-- Plan & Infra -->
+          <div class="form-section">
+            <div class="sec-label"><i class="fa-solid fa-building fa-xs"></i> Plano &amp; Infra</div>
+            <div class="plan-pills" style="margin-bottom:7px">
+              <label class="plan-pill">
+                <input type="radio" name="plan" value="free" />
+                <span class="pn">Free</span>
+                <span class="pd">100 fixas sem/host</span>
+              </label>
+              <label class="plan-pill">
+                <input type="radio" name="plan" value="pro" checked />
+                <span class="pn">Pro</span>
+                <span class="pd">100/host ~$15/host</span>
+              </label>
+              <label class="plan-pill">
+                <input type="radio" name="plan" value="enterprise" />
+                <span class="pn">Enterprise</span>
+                <span class="pd">200/host ~$23/host</span>
+              </label>
+            </div>
+            <div class="row2">
+              <div class="field">
+                <label>Hosts / Containers</label>
+                <input type="number" id="hosts" value="5" min="1" />
+              </div>
+              <div class="field">
+                <label>Eventos/hora (∞)</label>
+                <input type="number" id="reqPerHour" value="50000" min="1" />
+              </div>
+            </div>
+          </div>
+
+          <!-- Tags -->
+          <div class="tags-section">
+            <div class="tags-header">
+              <div class="sec-label" style="margin-bottom:0;flex:1">
+                <i class="fa-solid fa-tags fa-xs"></i> Tags
+                <span class="tags-count" id="tagCount">0</span>
+              </div>
+              <button class="btn-add-tag" onclick="addTag()">
+                <i class="fa-solid fa-plus fa-xs"></i> Adicionar
+              </button>
+            </div>
+            <div class="tags-list" id="tagsList"></div>
+            <div class="unbounded-hint" id="unboundedHint">
+              <i class="fa-solid fa-skull-crossbones fa-xs"></i>
+              <strong> Cardinalidade Infinita:</strong> Qtd = <code>0</code> usa eventos/hora como proxy
+              — simula <code>request_id</code>, <code>session_id</code>.
+            </div>
+          </div>
+
+        </div>
+
+        <div class="panel-footer">
+          <button class="btn-calc" onclick="calcular()">
+            <i class="fa-solid fa-calculator"></i> Calcular Projeção
+          </button>
+        </div>
+      </aside>
+
+      <!-- DRAGGABLE DIVIDER -->
+      <div class="panel-divider" id="panelDivider">
+        <div class="divider-handle"></div>
+      </div>
+
+      <!-- RIGHT PANEL: RESULTS -->
+      <section class="panel-right" id="panelRight">
+        <div class="placeholder" id="placeholder">
+          <div class="placeholder-icon"><img src="./favicon.png" alt="Datadog Custom Metrics Simulator Logo" /></div>
+          <h3>Aguardando simulação</h3>
+          <p>Configure as tags e clique em "Calcular Projeção"</p>
+        </div>
+        <div class="results" id="results" style="display:none"></div>
+      </section>
+
+    </main>
+  </div>
+
+  <!-- CODE MODAL -->
+  <div class="modal-overlay" id="codeModal" onclick="handleOverlayClick(event)">
+    <div class="modal-box">
+      <div class="modal-hdr">
+        <div class="modal-hdr-l">
+          <div class="modal-icon"><img src="./favicon.png" alt="Datadog Custom Metrics Simulator Logo" /></div>
+          <span class="modal-title">Código de Instrumentação</span>
+          <span class="modal-sub" id="modalSub"></span>
+        </div>
+        <div class="modal-actions">
+          <button class="mbtn mbtn-copy" id="btnCopy" onclick="copyCode()">
+            <i class="fa-solid fa-copy"></i> Copiar
+          </button>
+          <button class="mbtn mbtn-close" onclick="closeCodeModal()">
+            <i class="fa-solid fa-xmark"></i> Fechar
+          </button>
+        </div>
+      </div>
+      <div class="lang-tabs">
+        <button class="lang-tab active" data-lang="python"  onclick="switchLang(this)">Python</button>
+        <button class="lang-tab"        data-lang="go"       onclick="switchLang(this)">Go</button>
+        <button class="lang-tab"        data-lang="java"     onclick="switchLang(this)">Java</button>
+        <button class="lang-tab"        data-lang="csharp"   onclick="switchLang(this)">.NET C#</button>
+        <button class="lang-tab"        data-lang="rust"     onclick="switchLang(this)">Rust</button>
+        <button class="lang-tab"        data-lang="kotlin"   onclick="switchLang(this)">Kotlin</button>
+      </div>
+      <div class="code-wrap">
+        <pre class="code-block" id="codeBlock" tabindex="-1"></pre>
+      </div>
+      <div class="modal-note">
+        <i class="fa-solid fa-circle-info fa-xs"></i>
+        Código de referência — adapte host do Agent DogStatsD e valores ao seu ambiente.
+      </div>
+    </div>
+  </div>
+
+</body>
+</html>
