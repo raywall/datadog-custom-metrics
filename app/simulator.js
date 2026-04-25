@@ -4,7 +4,14 @@
 
 // ─── State ──────────────────────────────────────────────────
 let tagSeq = 0;
-// Tag shape: { id, name, count, values: string[] }
+// Tag shape:
+//   { id, name, count, values: string[], regime }
+// regime applies only when count === 0 (cardinalidade não-bounded):
+//   'per_request'           — varia junto com a requisição/evento (correlation_id,
+//                             trace_id, request_id). Múltiplas tags com este regime
+//                             co-variam e contribuem com 1× rph para o cálculo.
+//   'independent_unbounded' — efêmera mas com ritmo próprio (pod_name muito dinâmico,
+//                             user_id em métrica não-por-request). Multiplica como rph.
 const tags = [];
 
 const PLANS = {
@@ -116,8 +123,8 @@ function getMetricMult() {
 }
 
 // ─── Tags ───────────────────────────────────────────────────
-function addTag(name = '', count = 4, values = []) {
-    tags.push({ id: ++tagSeq, name, count, values });
+function addTag(name = '', count = 4, values = [], regime = 'per_request') {
+    tags.push({ id: ++tagSeq, name, count, values, regime });
     renderTags();
 }
 
@@ -136,6 +143,15 @@ function onTagCountChange(id, val) {
     const t = tags.find(t => t.id === id);
     if (!t) return;
     t.count = parseInt(val) || 0;
+    renderTags(); // re-render to show/hide regime pills
+    checkUnbounded();
+}
+
+function onTagRegimeChange(id, regime) {
+    const t = tags.find(t => t.id === id);
+    if (!t) return;
+    t.regime = regime;
+    renderTags();
     checkUnbounded();
 }
 
@@ -171,6 +187,35 @@ function renderTags() {
         const card = document.createElement('div');
         card.className = 'tag-card';
         card.dataset.id = t.id;
+
+        const showRegime = t.count === 0 && t.values.length === 0;
+        const regime = t.regime || 'per_request';
+
+        const regimePills = showRegime ? `
+      <div class="tag-regime-row">
+        <div class="regime-label">
+          <i class="fa-solid fa-shuffle fa-xs"></i> Regime de variação
+        </div>
+        <div class="regime-pills">
+          <label class="regime-pill ${regime === 'per_request' ? 'active' : ''}"
+                 title="Co-varia com a requisição/evento. Várias tags neste regime são agrupadas e contribuem com 1× rph.">
+            <input type="radio" name="regime-${t.id}" value="per_request"
+                   ${regime === 'per_request' ? 'checked' : ''}
+                   onchange="onTagRegimeChange(${t.id}, 'per_request')" />
+            <span class="rn"><i class="fa-solid fa-link fa-xs"></i> Por requisição</span>
+            <span class="rd">co-variante (correlation_id, trace_id…)</span>
+          </label>
+          <label class="regime-pill ${regime === 'independent_unbounded' ? 'active' : ''}"
+                 title="Efêmera mas com ritmo próprio. Multiplica como rph (alta cardinalidade).">
+            <input type="radio" name="regime-${t.id}" value="independent_unbounded"
+                   ${regime === 'independent_unbounded' ? 'checked' : ''}
+                   onchange="onTagRegimeChange(${t.id}, 'independent_unbounded')" />
+            <span class="rn"><i class="fa-solid fa-burst fa-xs"></i> Independente</span>
+            <span class="rd">alta cardinalidade (pod_name, user_id…)</span>
+          </label>
+        </div>
+      </div>` : '';
+
         card.innerHTML = `
       <!-- row 1: name + count + delete -->
       <div class="tag-card-main">
@@ -182,7 +227,7 @@ function renderTags() {
             oninput="onTagNameChange(${t.id}, this.value)" />
         </div>
         <div class="field tag-count-f">
-          <label title="0 = cardinalidade infinita (usa eventos/hora)">Qtd</label>
+          <label title="0 = cardinalidade não-bounded (efêmera)">Qtd</label>
           <input class="tag-count-input" type="number" min="0"
             value="${t.count}"
             oninput="onTagCountChange(${t.id}, this.value)" />
@@ -200,7 +245,8 @@ function renderTags() {
             value="${esc(t.values.join(', '))}"
             oninput="onTagValuesChange(${t.id}, this.value)" />
         </div>
-      </div>`;
+      </div>
+      ${regimePills}`;
         list.appendChild(card);
     });
 
@@ -209,13 +255,23 @@ function renderTags() {
 }
 
 function checkUnbounded() {
-    const hasUnbounded = tags.some(t => t.values.length === 0 && t.count === 0);
-    document.getElementById('unboundedHint')?.classList.toggle('show', hasUnbounded);
+    const indepCount = tags.filter(t =>
+        t.count === 0 && t.values.length === 0 && t.regime === 'independent_unbounded'
+    ).length;
+    const hint = document.getElementById('unboundedHint');
+    if (hint) hint.classList.toggle('show', indepCount > 0);
 }
 
 /**
  * Snapshot the live DOM state into a clean array for calculation / code gen.
  * Sync values back to the tags state array as a side-effect.
+ *
+ * Each entry returns:
+ *   { id, name, count, values, kind, effectiveCount }
+ * where:
+ *   kind = 'fixed'                 — bounded, multiplica como sempre
+ *   kind = 'per_request'           — co-variante por evento, agrupa com outras per_request
+ *   kind = 'independent_unbounded' — efêmera independente, multiplica com rph
  */
 function snapshotTags() {
     const rph = parseInt(document.getElementById('reqPerHour')?.value) || 50000;
@@ -229,15 +285,23 @@ function snapshotTags() {
 
         const values = rawValues ? rawValues.split(',').map(v => v.trim()).filter(Boolean) : t.values;
         const count = values.length > 0 ? values.length : (parseInt(rawCount) || 0);
-        const unbounded = values.length === 0 && count === 0;
-        const effectiveCount = unbounded ? rph : count;
 
         // Sync back
         t.name = name;
         t.count = count;
         t.values = values;
 
-        return { id: t.id, name, count: effectiveCount, values, unbounded };
+        // Classify regime
+        let kind, effectiveCount;
+        if (count > 0) {
+            kind = 'fixed';
+            effectiveCount = count;
+        } else {
+            kind = t.regime === 'independent_unbounded' ? 'independent_unbounded' : 'per_request';
+            effectiveCount = rph;
+        }
+
+        return { id: t.id, name, count, values, kind, effectiveCount };
     });
 }
 
@@ -253,11 +317,21 @@ function calcular() {
     const pKey = document.querySelector('input[name=plan]:checked')?.value || 'pro';
     const plan = PLANS[pKey];
 
-    const snap = snapshotTags(rph);
-    const hasInf = snap.some(t => t.unbounded);
+    const snap = snapshotTags();
 
+    // ── Combos: regime-aware product ───────────────────────────────
+    // - 'fixed' tags multiply by their bounded count (V values)
+    // - 'independent_unbounded' tags multiply by rph (each one is its own dimension)
+    // - 'per_request' tags co-vary with the request → all of them together
+    //   contribute as a SINGLE rph factor to the product
     let combos = hosts;
-    snap.forEach(t => combos *= t.count);
+    const fixedTags = snap.filter(t => t.kind === 'fixed');
+    const indepTags = snap.filter(t => t.kind === 'independent_unbounded');
+    const perReqTags = snap.filter(t => t.kind === 'per_request');
+
+    fixedTags.forEach(t => combos *= t.effectiveCount);
+    indepTags.forEach(t => combos *= t.effectiveCount); // each multiplies by rph
+    if (perReqTags.length > 0) combos *= rph;            // group contributes 1× rph total
 
     const totalSeries = combos * mMult;
     const allot = pKey === 'free' ? plan.fixedAllot : plan.allotPerHost * hosts;
@@ -296,10 +370,25 @@ function calcular() {
     </div>`;
     }
 
+    // Per-request grouping note (didactic)
+    if (perReqTags.length >= 2) {
+        const names = perReqTags.map(t => `<code>${esc(t.name || 'tag')}</code>`).join(', ');
+        h += `<div class="alert alert-info">
+      <i class="fa-solid fa-link fa-xs"></i>
+      <span>
+        <strong>Tags co-variantes agrupadas:</strong> ${names} variam juntas
+        por requisição e contribuem com <strong>1× ${fmt(rph)}</strong> ao produto
+        (não <code>${fmt(rph)}<sup>${perReqTags.length}</sup></code>). Cada evento gera
+        uma única tupla nova, não um produto cartesiano.
+      </span>
+    </div>`;
+    }
+
     // Main alert
-    if (hasInf) {
+    if (indepTags.length > 0) {
+        const names = indepTags.map(t => `<code>${esc(t.name || 'tag')}</code>`).join(', ');
         h += mkAlert('red', 'fa-skull-crossbones',
-            `<strong>Cardinalidade Infinita.</strong> Tags com Qtd = 0 geram ${fmt(rph)} séries/hora. Aplique Metrics without Limits™ para barrar a indexação.`);
+            `<strong>Cardinalidade independente alta:</strong> ${names} multiplica${indepTags.length > 1 ? 'm' : ''} com ${fmt(rph)} séries/hora cada. Risco real de explosão. Aplique Metrics without Limits™ para barrar a indexação.`);
     } else if (over > 0) {
         const pct = Math.round(over / totalSeries * 100);
         h += mkAlert('amber', 'fa-triangle-exclamation',
@@ -311,34 +400,58 @@ function calcular() {
 
     // Stats
     h += `<div class="stat-grid">
-    <div class="sbox"><div class="sl">Combinações</div><div class="sv sv-purple">${fmt(combos)}</div></div>
-    <div class="sbox"><div class="sl">Séries Temporais</div><div class="sv sv-teal">${fmt(totalSeries)}</div></div>
+    <div class="sbox"><div class="sl">Combinações <span class="ssub">por hora</span></div><div class="sv sv-purple">${fmt(combos)}</div></div>
+    <div class="sbox"><div class="sl">Séries Temporais <span class="ssub">média ativa/hora</span></div><div class="sv sv-teal">${fmt(totalSeries)}</div></div>
     <div class="sbox"><div class="sl">Franquia</div><div class="sv sv-muted">${fmt(allot)}</div></div>
     <div class="sbox"><div class="sl">Excedente</div><div class="sv ${over > 0 ? 'sv-red' : 'sv-green'}">${fmt(over)}</div></div>
     <div class="sbox"><div class="sl">Blocos 100</div><div class="sv sv-amber">${fmt(overB)}</div></div>
     <div class="sbox"><div class="sl">Custo / mês</div><div class="sv ${total > 0 ? 'sv-red' : 'sv-green'}">$${money(total)}</div></div>
   </div>`;
 
-    // Formula
+    // Formula — chips reflect the regime grouping
     let chips = `<div class="chip"><span class="cn">hosts</span><span class="cv">${hosts}</span></div>`;
+
+    // 1. Fixed tags individually
+    fixedTags.forEach(t => {
+        chips += `<span class="fop">×</span>
+      <div class="chip">
+        <span class="cn">${esc(t.name)}</span>
+        <span class="cv">${fmt(t.effectiveCount)}</span>
+      </div>`;
+    });
+
+    // 2. Independent unbounded tags individually
+    indepTags.forEach(t => {
+        chips += `<span class="fop">×</span>
+      <div class="chip chip-inf">
+        <span class="cn">${esc(t.name)} ⚠</span>
+        <span class="cv">${fmt(t.effectiveCount)}</span>
+      </div>`;
+    });
+
+    // 3. Per-request group as a single chip
+    if (perReqTags.length > 0) {
+        const groupName = perReqTags.length === 1
+            ? esc(perReqTags[0].name || 'per-request')
+            : '⟨' + perReqTags.map(t => esc(t.name || 'tag')).join(', ') + '⟩';
+        chips += `<span class="fop">×</span>
+      <div class="chip chip-group" title="Tags co-variantes — todas contribuem com 1× rph para o grupo">
+        <span class="cn">${groupName}</span>
+        <span class="cv">${fmt(rph)}</span>
+      </div>`;
+    }
+
     if (snap.length === 0) {
         chips += `<span class="fop">×</span><div class="chip"><span class="cn">sem tags</span><span class="cv">1</span></div>`;
-    } else {
-        snap.forEach(t => {
-            chips += `<span class="fop">×</span>
-        <div class="chip ${t.unbounded ? 'chip-inf' : ''}">
-          <span class="cn">${esc(t.name)}${t.unbounded ? ' ⚠' : ''}</span>
-          <span class="cv">${fmt(t.count)}</span>
-        </div>`;
-        });
     }
+
     chips += `<span class="fop">×</span>
     <div class="chip chip-type"><span class="cn">tipo</span><span class="cv">${mMult}×</span></div>
     <span class="fop">=</span>
     <div class="fresult">${fmt(totalSeries)}</div>`;
 
     h += `<div class="formula-box">
-    <div class="formula-label">C(M) = H × ∏ V(tᵢ) × M_tipo</div>
+    <div class="formula-label">C(M) = H × ∏ V(tᵢ_fixa) × ∏ rph(tᵢ_indep) × rph(grupo_per_req?) × M_tipo</div>
     <div class="formula-row">${chips}</div>
   </div>`;
 
@@ -377,6 +490,19 @@ function calcular() {
         ${isDist ? 'Distributions permitem também remover o <code style="background:rgba(0,217,184,.1);padding:0 4px;border-radius:3px;font-family:var(--mono)">host</code> do allowlist.' : ''}
         Economia: <strong style="color:var(--teal)">$${money(cIdx - cIng)}/mês</strong>.
       </div>
+    </div>`;
+    }
+
+    // Hourly-window note (didactic)
+    if (perReqTags.length > 0 || indepTags.length > 0) {
+        h += `<div class="hour-note">
+      <i class="fa-solid fa-clock fa-xs"></i>
+      <span>
+        <strong>Janela horária:</strong> séries temporais só são contadas na hora em que
+        reportam ao menos um ponto. Tags efêmeras como <code>correlation_id</code> que
+        aparecem uma única vez "expiram" no mesmo hour-bucket — por isso o billing escala
+        com a <strong>taxa por hora</strong>, não com o volume mensal acumulado.
+      </span>
     </div>`;
     }
 
@@ -494,8 +620,8 @@ document.addEventListener('DOMContentLoaded', () => {
     initTheme();
     initDivider();
 
-    // Seed default tags
-    addTag('region', 4, ['us-east', 'eu-west', 'sa-east', 'ap-south']);
-    addTag('endpoint', 10, []);
-    addTag('env', 3, ['prod', 'staging', 'dev']);
+    // Seed default tags — mistura representativa
+    addTag('region', 4, ['us-east', 'eu-west', 'sa-east', 'ap-south'], 'per_request');
+    addTag('endpoint', 10, [], 'per_request');
+    addTag('env', 3, ['prod', 'staging', 'dev'], 'per_request');
 });

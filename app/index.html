@@ -107,7 +107,7 @@
                 <input type="number" id="hosts" value="5" min="1" />
               </div>
               <div class="field">
-                <label>Eventos/hora (∞)</label>
+                <label title="Taxa de eventos da métrica. Usado para estimar a contribuição de tags efêmeras (regime 'Por requisição' ou 'Independente').">Requisições/hora</label>
                 <input type="number" id="reqPerHour" value="50000" min="1" />
               </div>
             </div>
@@ -127,8 +127,11 @@
             <div class="tags-list" id="tagsList"></div>
             <div class="unbounded-hint" id="unboundedHint">
               <i class="fa-solid fa-skull-crossbones fa-xs"></i>
-              <strong> Cardinalidade Infinita:</strong> Qtd = <code>0</code> usa eventos/hora como proxy
-              — simula <code>request_id</code>, <code>session_id</code>.
+              <strong> Cardinalidade independente alta:</strong> tags marcadas como
+              <code>Independente</code> multiplicam o produto por <code>rph</code> cada — risco
+              real de explosão. Tags <code>Por requisição</code> co-variam e são agrupadas
+              (1× rph para todas), padrão seguro para <code>correlation_id</code>,
+              <code>trace_id</code>, etc.
             </div>
           </div>
 
