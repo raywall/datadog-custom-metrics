@@ -159,8 +159,8 @@ header {
 }
 
 .hdr-logo img {
-    width: 30px;
-    height: 30px;
+    width:30px;
+    height:30px;
 }
 
 /* FIX: was 800 (distorted Syne); 700 renders cleanly */
@@ -225,6 +225,107 @@ header {
 
 [data-theme="light"] .btn-codegen {
     color: var(--purple);
+}
+
+/* ─── Language dropdown ───────────────────────────────────── */
+.lang-wrap {
+    position: relative;
+    display: flex;
+    align-items: center;
+}
+
+.lang-icon {
+    position: absolute;
+    left: 9px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: var(--txt2);
+    font-size: .72rem;
+    pointer-events: none;
+    transition: color .15s;
+}
+
+.lang-wrap:hover .lang-icon {
+    color: var(--purple-lt);
+}
+
+[data-theme="light"] .lang-wrap:hover .lang-icon {
+    color: var(--purple);
+}
+
+.lang-select {
+    appearance: none;
+    background: var(--bg2);
+    border: 1px solid var(--border2);
+    border-radius: var(--r);
+    color: var(--txt1);
+    font-family: var(--sans);
+    font-size: .72rem;
+    font-weight: var(--bold);
+    padding: 7px 24px 7px 26px;
+    cursor: pointer;
+    line-height: 1.2;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='10' height='10' viewBox='0 0 10 10'%3E%3Cpath fill='%235a6285' d='M5 7L1 3h8z'/%3E%3C/svg%3E");
+    background-repeat: no-repeat;
+    background-position: right 8px center;
+    transition: border-color .15s, color .15s;
+    height: 34px;
+}
+
+.lang-select:hover,
+.lang-select:focus {
+    border-color: var(--purple);
+    color: var(--purple-lt);
+    outline: none;
+}
+
+[data-theme="light"] .lang-select:hover,
+[data-theme="light"] .lang-select:focus {
+    color: var(--purple);
+}
+
+.lang-select option {
+    background: var(--bg2);
+    color: var(--txt0);
+    font-weight: 500;
+}
+
+/* ─── Header divider ──────────────────────────────────────── */
+.hdr-divider {
+    width: 1px;
+    height: 22px;
+    background: var(--border2);
+    margin: 0 4px;
+    flex-shrink: 0;
+}
+
+/* ─── Share button ────────────────────────────────────────── */
+.btn-share {
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    background: rgba(0, 217, 184, .1);
+    border: 1px solid rgba(0, 217, 184, .28);
+    color: var(--teal);
+    border-radius: var(--r);
+    padding: 7px 14px;
+    cursor: pointer;
+    font-family: var(--sans);
+    font-size: .74rem;
+    font-weight: var(--bold);
+    letter-spacing: .03em;
+    transition: background .15s, border-color .15s;
+}
+
+.btn-share:hover {
+    background: rgba(0, 217, 184, .2);
+    border-color: rgba(0, 217, 184, .5);
+}
+
+.btn-share.shared {
+    background: rgba(34, 197, 94, .14);
+    border-color: rgba(34, 197, 94, .4);
+    color: var(--green);
 }
 
 /* ═══════════════════════════════════════════════════════════
@@ -1576,6 +1677,27 @@ input[type=number]::-webkit-outer-spin-button {
     background: rgba(34, 197, 94, .12);
     border-color: rgba(34, 197, 94, .32);
     color: var(--green);
+}
+
+.mbtn-download {
+    background: rgba(124, 58, 237, .1);
+    border-color: rgba(124, 58, 237, .3);
+    color: var(--purple-lt);
+}
+
+.mbtn-download:hover {
+    background: rgba(124, 58, 237, .2);
+    border-color: rgba(124, 58, 237, .5);
+}
+
+.mbtn-download.copied {
+    background: rgba(34, 197, 94, .12);
+    border-color: rgba(34, 197, 94, .32);
+    color: var(--green);
+}
+
+[data-theme="light"] .mbtn-download {
+    color: var(--purple);
 }
 
 .mbtn-close {

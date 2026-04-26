@@ -14,17 +14,17 @@
 
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  
+
   <title>Datadog · Simulador de Métricas</title>
   <link rel="icon" type="image/x-icon" href="./favicon.png">
-  
+
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  
+
   <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,100..800;1,100..800&family=Open+Sans:ital,wght@0,300..800;1,300..800&display=swap" />
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
   <link rel="stylesheet" href="style.css" />
-  
+
   <script src="simulator.js" defer></script>
 </head>
 
@@ -35,15 +35,35 @@
     <header>
       <div class="hdr-l">
         <div class="hdr-logo"><img src="./favicon.png" alt="Datadog Custom Metrics Simulator Logo" /></div>
-        <span class="hdr-title">Datadog Metric Simulator</span>
-        <span class="hdr-sub">Cardinalidade · FinOps · Governança</span>
+        <span class="hdr-title" data-i18n="header.title">Datadog Metric Simulator</span>
+        <span class="hdr-sub" data-i18n="header.sub">Cardinalidade · FinOps · Governança</span>
       </div>
       <div class="hdr-actions">
-        <button id="btnTheme" class="btn-theme" onclick="toggleTheme()" title="Alternar tema">
-          <i class="fa-solid fa-moon"></i>
-        </button>
+        <!-- 1. language dropdown -->
+        <div class="lang-wrap">
+          <i class="fa-solid fa-globe lang-icon"></i>
+          <select id="langSelect" class="lang-select" onchange="setLanguage(this.value)"
+                  data-i18n-title="header.lang_tooltip" title="Idioma da interface">
+            <option value="pt-BR">🇧🇷 Português</option>
+            <option value="en-US">🇺🇸 English</option>
+            <option value="es-ES">🇪🇸 Español</option>
+          </select>
+        </div>
+        <!-- 2. visual divider -->
+        <div class="hdr-divider"></div>
+        <!-- 3. generate code -->
         <button class="btn-codegen" onclick="openCodeModal()">
-          <i class="fa-solid fa-code"></i> Gerar Código
+          <i class="fa-solid fa-code"></i> <span data-i18n="header.btn_code">Gerar Código</span>
+        </button>
+        <!-- 4. share -->
+        <button id="btnShare" class="btn-share" onclick="sharePage()"
+                data-i18n-title="header.share_tooltip" title="Compartilhar simulador">
+          <i class="fa-solid fa-share-nodes"></i> <span data-i18n="header.btn_share">Compartilhar</span>
+        </button>
+        <!-- 5. theme -->
+        <button id="btnTheme" class="btn-theme" onclick="toggleTheme()"
+                data-i18n-title="header.theme_tooltip" title="Alternar tema">
+          <i class="fa-solid fa-moon"></i>
         </button>
       </div>
     </header>
@@ -57,18 +77,22 @@
 
           <!-- Metric -->
           <div class="form-section">
-            <div class="sec-label"><i class="fa-solid fa-chart-line fa-xs"></i> Métrica</div>
+            <div class="sec-label"><i class="fa-solid fa-chart-line fa-xs"></i> <span data-i18n="form.section_metric">Métrica</span></div>
             <div class="field" style="margin-bottom:7px">
-              <label>Nome <span class="lbl-hint">— governança: <code>custom.</code> prefixo · tipo como sufixo</span></label>
+              <label>
+                <span data-i18n="form.label_name">Nome</span>
+                <span class="lbl-hint" data-i18n-html="form.label_name_hint">— governança: <code>custom.</code> prefixo · tipo como sufixo</span>
+              </label>
               <div class="metric-name-wrap" id="metricNameWrap">
                 <span class="mn-prefix">custom.</span>
                 <input type="text" id="metricName" value="app.ecommerce.checkout.latency"
+                  data-i18n-placeholder="form.name_placeholder"
                   placeholder="service.operation.metric" />
                 <span class="mn-suffix" id="metricNameSuffix">.distribution</span>
               </div>
             </div>
             <div class="field">
-              <label>Tipo</label>
+              <label data-i18n="form.label_type">Tipo</label>
               <select id="metricType" onchange="onMetricTypeChange()">
                 <option value="1" data-m="count">COUNT / RATE — 1×</option>
                 <option value="1" data-m="gauge">GAUGE — 1×</option>
@@ -80,38 +104,38 @@
             </div>
             <div class="dist-info" id="distInfo" style="display:none">
               <i class="fa-solid fa-circle-info fa-xs"></i>
-              <strong> Distributions:</strong> permitem remover o <code>host</code> do allowlist de indexação
-              via MwL — exclusivo deste tipo. Percentis (10×) aplicam-se a <strong>todas</strong> as tags indexadas.
+              <span data-i18n-html="form.dist_info"><strong>Distributions:</strong> permitem remover o <code>host</code> do allowlist de indexação via MwL — exclusivo deste tipo. Percentis (10×) aplicam-se a <strong>todas</strong> as tags indexadas.</span>
             </div>
           </div>
 
           <!-- Plan & Infra -->
           <div class="form-section">
-            <div class="sec-label"><i class="fa-solid fa-building fa-xs"></i> Plano &amp; Infra</div>
+            <div class="sec-label"><i class="fa-solid fa-building fa-xs"></i> <span data-i18n="form.section_plan">Plano &amp; Infra</span></div>
             <div class="plan-pills" style="margin-bottom:7px">
               <label class="plan-pill">
                 <input type="radio" name="plan" value="free" />
-                <span class="pn">Free</span>
-                <span class="pd">100 fixas sem/host</span>
+                <span class="pn" data-i18n="form.plan_free_name">Free</span>
+                <span class="pd" data-i18n="form.plan_free_desc">100 fixas sem/host</span>
               </label>
               <label class="plan-pill">
                 <input type="radio" name="plan" value="pro" checked />
-                <span class="pn">Pro</span>
-                <span class="pd">100/host ~$15/host</span>
+                <span class="pn" data-i18n="form.plan_pro_name">Pro</span>
+                <span class="pd" data-i18n="form.plan_pro_desc">100/host ~$15/host</span>
               </label>
               <label class="plan-pill">
                 <input type="radio" name="plan" value="enterprise" />
-                <span class="pn">Enterprise</span>
-                <span class="pd">200/host ~$23/host</span>
+                <span class="pn" data-i18n="form.plan_ent_name">Enterprise</span>
+                <span class="pd" data-i18n="form.plan_ent_desc">200/host ~$23/host</span>
               </label>
             </div>
             <div class="row2">
               <div class="field">
-                <label>Hosts / Containers</label>
+                <label data-i18n="form.label_hosts">Hosts / Containers</label>
                 <input type="number" id="hosts" value="5" min="1" />
               </div>
               <div class="field">
-                <label title="Emissões da métrica por hora, por host. Para sistema total, divida pelo número de hosts. Esse valor define o teto de cardinalidade — você não pode ter mais timeseries únicas/hora do que emissões/hora.">Emissões/hora · host</label>
+                <label data-i18n="form.label_rph" data-i18n-title="form.label_rph_tooltip"
+                       title="Emissões da métrica por hora, por host. Para sistema total, divida pelo número de hosts.">Emissões/hora · host</label>
                 <input type="number" id="reqPerHour" value="50000" min="1" />
               </div>
             </div>
@@ -121,21 +145,18 @@
           <div class="tags-section">
             <div class="tags-header">
               <div class="sec-label" style="margin-bottom:0;flex:1">
-                <i class="fa-solid fa-tags fa-xs"></i> Tags
+                <i class="fa-solid fa-tags fa-xs"></i>
+                <span data-i18n="form.tags_title">Tags</span>
                 <span class="tags-count" id="tagCount">0</span>
               </div>
               <button class="btn-add-tag" onclick="addTag()">
-                <i class="fa-solid fa-plus fa-xs"></i> Adicionar
+                <i class="fa-solid fa-plus fa-xs"></i> <span data-i18n="form.btn_add_tag">Adicionar</span>
               </button>
             </div>
             <div class="tags-list" id="tagsList"></div>
             <div class="unbounded-hint" id="unboundedHint">
               <i class="fa-solid fa-skull-crossbones fa-xs"></i>
-              <strong> Cardinalidade independente alta:</strong> tags marcadas como
-              <code>Independente</code> multiplicam o produto por <code>rph</code> cada — risco
-              real de explosão. Tags <code>Por requisição</code> co-variam e são agrupadas
-              (1× rph para todas), padrão seguro para <code>correlation_id</code>,
-              <code>trace_id</code>, etc.
+              <span data-i18n-html="form.unbounded_hint"><strong>Cardinalidade independente alta:</strong> tags marcadas como <code>Independente</code> multiplicam o produto por <code>rph</code> cada — risco real de explosão.</span>
             </div>
           </div>
 
@@ -143,7 +164,7 @@
 
         <div class="panel-footer">
           <button class="btn-calc" onclick="calcular()">
-            <i class="fa-solid fa-calculator"></i> Calcular Projeção
+            <i class="fa-solid fa-calculator"></i> <span data-i18n="form.btn_calc">Calcular Projeção</span>
           </button>
         </div>
       </aside>
@@ -157,8 +178,8 @@
       <section class="panel-right" id="panelRight">
         <div class="placeholder" id="placeholder">
           <div class="placeholder-icon"><img src="./favicon.png" alt="Datadog Custom Metrics Simulator Logo" /></div>
-          <h3>Aguardando simulação</h3>
-          <p>Configure as tags e clique em "Calcular Projeção"</p>
+          <h3 data-i18n="placeholder.title">Aguardando simulação</h3>
+          <p data-i18n="placeholder.desc">Configure as tags e clique em "Calcular Projeção"</p>
         </div>
         <div class="results" id="results" style="display:none"></div>
       </section>
@@ -172,15 +193,18 @@
       <div class="modal-hdr">
         <div class="modal-hdr-l">
           <div class="modal-icon"><img src="./favicon.png" alt="Datadog Custom Metrics Simulator Logo" /></div>
-          <span class="modal-title">Código de Instrumentação</span>
+          <span class="modal-title" data-i18n="modal.title">Código de Instrumentação</span>
           <span class="modal-sub" id="modalSub"></span>
         </div>
         <div class="modal-actions">
+          <button class="mbtn mbtn-download" id="btnDownload" onclick="downloadCode()">
+            <i class="fa-solid fa-download"></i> <span data-i18n="modal.btn_download">Baixar</span>
+          </button>
           <button class="mbtn mbtn-copy" id="btnCopy" onclick="copyCode()">
-            <i class="fa-solid fa-copy"></i> Copiar
+            <i class="fa-solid fa-copy"></i> <span data-i18n="modal.btn_copy">Copiar</span>
           </button>
           <button class="mbtn mbtn-close" onclick="closeCodeModal()">
-            <i class="fa-solid fa-xmark"></i> Fechar
+            <i class="fa-solid fa-xmark"></i> <span data-i18n="modal.btn_close">Fechar</span>
           </button>
         </div>
       </div>
@@ -191,13 +215,14 @@
         <button class="lang-tab"        data-lang="csharp"   onclick="switchLang(this)">.NET C#</button>
         <button class="lang-tab"        data-lang="rust"     onclick="switchLang(this)">Rust</button>
         <button class="lang-tab"        data-lang="kotlin"   onclick="switchLang(this)">Kotlin</button>
+        <button class="lang-tab"        data-lang="ruby"     onclick="switchLang(this)">Ruby</button>
       </div>
       <div class="code-wrap">
         <pre class="code-block" id="codeBlock" tabindex="-1"></pre>
       </div>
       <div class="modal-note">
         <i class="fa-solid fa-circle-info fa-xs"></i>
-        Código de referência — adapte host do Agent DogStatsD e valores ao seu ambiente.
+        <span data-i18n="modal.note">Código gerado a partir das tags e configuração do simulador — adapte host do Agent DogStatsD ao seu ambiente.</span>
       </div>
     </div>
   </div>
