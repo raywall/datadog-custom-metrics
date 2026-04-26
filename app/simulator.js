@@ -111,6 +111,7 @@ function onMetricTypeChange() {
     const isDist = getIsDistribution();
     const el = document.getElementById('distInfo');
     if (el) el.style.display = isDist ? 'block' : 'none';
+    updateMetricSuffix();
 }
 
 function getIsDistribution() {
@@ -120,6 +121,43 @@ function getIsDistribution() {
 
 function getMetricMult() {
     return parseInt(document.getElementById('metricType')?.value || '1');
+}
+
+// ─── Metric name composition (governance) ───────────────────
+// Convention: custom.{user-input}.{type}
+//   custom.   → fixed prefix (governance)
+//   user      → editable midname
+//   .{type}   → suffix derived from selected type's data-m
+//
+// Examples:
+//   user types "app.checkout.latency" + DISTRIBUTION
+//     → custom.app.checkout.latency.distribution
+//   user types ""                    + COUNT
+//     → custom.my.metric.count   (placeholder fallback)
+
+function getMetricMidName() {
+    const raw = (document.getElementById('metricName')?.value || '').trim();
+    // Strip any leading 'custom.' or trailing '.{type}' the user might paste in
+    let mid = raw.replace(/^custom\./i, '');
+    const suffix = getTypeSuffix();
+    if (suffix && mid.toLowerCase().endsWith('.' + suffix)) {
+        mid = mid.slice(0, -suffix.length - 1);
+    }
+    return mid || 'my.metric';
+}
+
+function getTypeSuffix() {
+    const sel = document.getElementById('metricType');
+    return sel?.options[sel.selectedIndex]?.dataset.m || 'count';
+}
+
+function getFullMetricName() {
+    return `custom.${getMetricMidName()}.${getTypeSuffix()}`;
+}
+
+function updateMetricSuffix() {
+    const el = document.getElementById('metricNameSuffix');
+    if (el) el.textContent = '.' + getTypeSuffix();
 }
 
 // ─── Tags ───────────────────────────────────────────────────
@@ -307,7 +345,7 @@ function snapshotTags() {
 
 // ─── Calculation ────────────────────────────────────────────
 function calcular() {
-    const mName = document.getElementById('metricName').value.trim() || 'my.metric';
+    const mName = getFullMetricName();
     const sel = document.getElementById('metricType');
     const mMult = parseInt(sel.value);
     const mMeth = sel.options[sel.selectedIndex].dataset.m || 'count';
@@ -319,19 +357,36 @@ function calcular() {
 
     const snap = snapshotTags();
 
-    // ── Combos: regime-aware product ───────────────────────────────
-    // - 'fixed' tags multiply by their bounded count (V values)
-    // - 'independent_unbounded' tags multiply by rph (each one is its own dimension)
-    // - 'per_request' tags co-vary with the request → all of them together
-    //   contribute as a SINGLE rph factor to the product
-    let combos = hosts;
+    // ── Combos: regime-aware product, capped by event rate ─────────
+    //
+    // KEY PRINCIPLE: cardinality/hour ≤ emissions/hour. You cannot
+    // produce more unique timeseries than you have metric emissions —
+    // each emission feeds exactly ONE timeseries.
+    //
+    // Per host: cardinality ≤ rph (events/h on that host).
+    // Total: cardinality = hosts × min(rph, ∏tag_dimensions_per_host).
+    //
+    // - 'fixed' tags contribute V values
+    // - 'independent_unbounded' tags contribute rph each (high cardinality)
+    // - 'per_request' group contributes rph once (correlation_id forces uniqueness)
+    //
+    // When any per-event-varying tag exists, the product ≥ rph,
+    // so cap kicks in and per-host cardinality = rph.
     const fixedTags = snap.filter(t => t.kind === 'fixed');
     const indepTags = snap.filter(t => t.kind === 'independent_unbounded');
     const perReqTags = snap.filter(t => t.kind === 'per_request');
+    const fixedProduct = fixedTags.reduce((a, t) => a * t.effectiveCount, 1);
 
-    fixedTags.forEach(t => combos *= t.effectiveCount);
-    indepTags.forEach(t => combos *= t.effectiveCount); // each multiplies by rph
-    if (perReqTags.length > 0) combos *= rph;            // group contributes 1× rph total
+    // Theoretical (uncapped) — kept for didactic display when cap kicks in
+    let theoreticalPerHost = fixedProduct;
+    indepTags.forEach(t => theoreticalPerHost *= rph);
+    if (perReqTags.length > 0) theoreticalPerHost *= rph;
+
+    // Capped per-host cardinality
+    const cardinalityPerHost = Math.min(rph, theoreticalPerHost);
+    const combos = hosts * cardinalityPerHost;
+    const theoreticalCombos = hosts * theoreticalPerHost;
+    const wasCapped = theoreticalCombos > combos;
 
     const totalSeries = combos * mMult;
     const allot = pKey === 'free' ? plan.fixedAllot : plan.allotPerHost * hosts;
@@ -370,8 +425,9 @@ function calcular() {
     </div>`;
     }
 
-    // Per-request grouping note (didactic)
-    if (perReqTags.length >= 2) {
+    // Per-request grouping note (didactic) — only shown when cap doesn't already
+    // tell the full story. With cap active, cap-row explains the bound directly.
+    if (perReqTags.length >= 2 && !wasCapped) {
         const names = perReqTags.map(t => `<code>${esc(t.name || 'tag')}</code>`).join(', ');
         h += `<div class="alert alert-info">
       <i class="fa-solid fa-link fa-xs"></i>
@@ -408,7 +464,7 @@ function calcular() {
     <div class="sbox"><div class="sl">Custo / mês</div><div class="sv ${total > 0 ? 'sv-red' : 'sv-green'}">$${money(total)}</div></div>
   </div>`;
 
-    // Formula — chips reflect the regime grouping
+    // Formula — chips reflect the theoretical product; cap shown separately if applies
     let chips = `<div class="chip"><span class="cn">hosts</span><span class="cv">${hosts}</span></div>`;
 
     // 1. Fixed tags individually
@@ -446,14 +502,42 @@ function calcular() {
     }
 
     chips += `<span class="fop">×</span>
-    <div class="chip chip-type"><span class="cn">tipo</span><span class="cv">${mMult}×</span></div>
-    <span class="fop">=</span>
-    <div class="fresult">${fmt(totalSeries)}</div>`;
+    <div class="chip chip-type"><span class="cn">tipo</span><span class="cv">${mMult}×</span></div>`;
+
+    // When NOT capped, the chips' product equals the actual result
+    // When capped, show theoretical result inline and the actual below
+    const theoreticalSeries = theoreticalCombos * mMult;
+
+    if (!wasCapped) {
+        chips += `<span class="fop">=</span><div class="fresult">${fmt(totalSeries)}</div>`;
+    } else {
+        chips += `<span class="fop">=</span>
+      <div class="fresult fresult-theoretical" title="Teórico — não realizável: excede a taxa de eventos">${fmt(theoreticalSeries)}</div>`;
+    }
 
     h += `<div class="formula-box">
-    <div class="formula-label">C(M) = H × ∏ V(tᵢ_fixa) × ∏ rph(tᵢ_indep) × rph(grupo_per_req?) × M_tipo</div>
-    <div class="formula-row">${chips}</div>
-  </div>`;
+    <div class="formula-label">C(M) = H × min(rph, ∏V(t)) × M_tipo  <span class="formula-sub">— rph: emissões/hora por host</span></div>
+    <div class="formula-row">${chips}</div>`;
+
+    if (wasCapped) {
+        h += `<div class="formula-cap-row">
+      <div class="cap-arrow">↘</div>
+      <div class="cap-content">
+        <div class="cap-title">Limitado pela taxa de eventos</div>
+        <div class="cap-explain">
+          Você só tem <strong>${fmt(rph)} emissões/hora por host</strong>; cada emissão produz <em>uma</em> timeseries.
+          Independente do produto teórico (${fmt(theoreticalSeries)}),
+          o máximo real é <code>hosts × rph × M_tipo</code>.
+        </div>
+        <div class="cap-formula">
+          ${hosts} × ${fmt(rph)} × ${mMult}× <span class="fop">=</span>
+          <span class="fresult">${fmt(totalSeries)}</span>
+        </div>
+      </div>
+    </div>`;
+    }
+
+    h += `</div>`;
 
     // Cost table
     h += `<table class="cost-table">
@@ -522,8 +606,7 @@ let currentLang = 'python';
 function openCodeModal() {
     document.getElementById('codeModal').classList.add('open');
     generateCode();
-    document.getElementById('modalSub').textContent =
-        document.getElementById('metricName').value.trim() || 'my.metric';
+    document.getElementById('modalSub').textContent = getFullMetricName();
 }
 
 function closeCodeModal() {
@@ -548,7 +631,7 @@ function resetCopyBtn() {
 }
 
 function getCodeCtx() {
-    const mName = document.getElementById('metricName').value.trim() || 'my.metric';
+    const mName = getFullMetricName();
     const sel = document.getElementById('metricType');
     const mMeth = sel.options[sel.selectedIndex].dataset.m || 'count';
     const snap = snapshotTags();
@@ -619,6 +702,7 @@ async function copyCode() {
 document.addEventListener('DOMContentLoaded', () => {
     initTheme();
     initDivider();
+    updateMetricSuffix();
 
     // Seed default tags — mistura representativa
     addTag('region', 4, ['us-east', 'eu-west', 'sa-east', 'ap-south'], 'per_request');

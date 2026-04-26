@@ -28,23 +28,46 @@ No Datadog, uma métrica customizada não é identificada apenas pelo seu nome. 
 
 O billing é apurado como a **média mensal de séries distintas ativas por hora**: para cada hora do mês, conta-se quantas timeseries reportaram pelo menos um ponto, e tira-se a média ao final do mês. Esse detalhe é fundamental — séries efêmeras que aparecem em uma única hora não inflam o billing nas horas seguintes.
 
+### Convenção de nomenclatura (governança)
+
+O simulador induz uma convenção padronizada de nome de métrica customizada para facilitar a governança:
+
+```
+custom.{nome.semântico.da.métrica}.{tipo}
+```
+
+Componentes:
+- **`custom.`** — prefixo imutável que sinaliza inequivocamente que a métrica não é de integração oficial. Útil para queries de auditoria, RBAC por tag, e pipelines de Metrics without Limits™ que filtram por prefixo.
+- **`{nome.semântico}`** — o que o time define livremente, em formato hierárquico por pontos (`app.ecommerce.checkout.latency`).
+- **`.{tipo}`** — sufixo automático derivado do tipo da métrica (`.count`, `.gauge`, `.set`, `.histogram`, `.distribution`). Facilita identificação visual em dashboards e alerta sobre o multiplicador de billing aplicável.
+
+Exemplo: uma métrica de latência de checkout do tipo DISTRIBUTION fica registrada como `custom.app.ecommerce.checkout.latency.distribution`.
+
+No simulador, o input do nome da métrica reflete essa convenção visualmente — o prefixo e o sufixo aparecem dentro do mesmo controle, com o miolo editável entre eles.
+
 ### Fórmula corrigida
 
 A cardinalidade horária esperada de uma métrica **M** é calculada como:
 
 ```
-C(M) = H × ∏ V(tᵢ_fixa) × ∏ rph(tᵢ_indep) × rph(grupo_per_req?) × M_tipo
+C(M) = H × min(rph, ∏ V(tᵢ_fixa) × ∏ rph(tᵢ_indep) × rph(grupo_per_req?)) × M_tipo
 ```
 
 Onde:
 - `H` é o número de hosts
+- `rph` é o número de **emissões/hora por host** da métrica
 - `V(tᵢ_fixa)` é o número de variações de cada tag **bounded** (com cardinalidade fixa conhecida)
-- `rph` é o número de eventos/requisições por hora
 - Cada tag **independente alta-cardinalidade** contribui com `rph`
 - O **grupo de tags `per_request`** (co-variantes) contribui com **um único** fator de `rph`, independentemente de quantas tags estejam no grupo
 - `M_tipo` é o multiplicador derivado do tipo da métrica
 
-Essa formulação corrige um equívoco comum (e que estava na versão anterior do simulador): tratar todas as tags efêmeras como independentes, fazendo `rph^N`. Quando `correlation_id`, `trace_id` e `price` variam **juntos** a cada requisição, cada evento gera **uma única tupla nova**, não um produto cartesiano. O detalhamento matemático completo está no [CUSTOM_METRICS.md](./CUSTOM_METRICS.md).
+O `min(rph, ...)` reflete um princípio fundamental: **a cardinalidade por hora é limitada pelo número de emissões por hora**. Cada emissão da métrica produz exatamente um ponto em uma timeseries, então você não pode ter mais timeseries únicas/hora do que emissões. Quando há tags `per_request` ou `independent_unbounded`, o produto teórico excede `rph`, então o cap kicka e a cardinalidade por host é limitada à taxa de emissões.
+
+Essa formulação corrige dois equívocos comuns (e que estavam em versões anteriores do simulador):
+1. Tratar todas as tags efêmeras como independentes, fazendo `rph^N` quando elas co-variam.
+2. Não aplicar o teto físico de `rph` ao produto cartesiano teórico.
+
+Detalhamento matemático completo no [CUSTOM_METRICS.md](./CUSTOM_METRICS.md).
 
 ### Regimes de variação por tag
 
@@ -116,6 +139,7 @@ O simulador calcula e exibe automaticamente a economia potencial com MwL para ca
 
 ## Funcionalidades
 
+- Indução de **convenção de nomenclatura padronizada** (`custom.{nome}.{tipo}`) para governança
 - Cálculo de cardinalidade com **regime de variação por tag** (fixa, por requisição, independente)
 - Suporte a valores explícitos por tag (lista separada por vírgula) com contagem automática
 - Agrupamento automático de tags `per_request` co-variantes em uma única dimensão de `rph`

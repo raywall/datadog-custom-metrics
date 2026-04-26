@@ -59,9 +59,13 @@
           <div class="form-section">
             <div class="sec-label"><i class="fa-solid fa-chart-line fa-xs"></i> Métrica</div>
             <div class="field" style="margin-bottom:7px">
-              <label>Nome</label>
-              <input type="text" id="metricName" value="app.ecommerce.checkout.latency"
-                placeholder="service.operation.metric" />
+              <label>Nome <span class="lbl-hint">— governança: <code>custom.</code> prefixo · tipo como sufixo</span></label>
+              <div class="metric-name-wrap" id="metricNameWrap">
+                <span class="mn-prefix">custom.</span>
+                <input type="text" id="metricName" value="app.ecommerce.checkout.latency"
+                  placeholder="service.operation.metric" />
+                <span class="mn-suffix" id="metricNameSuffix">.distribution</span>
+              </div>
             </div>
             <div class="field">
               <label>Tipo</label>
@@ -107,7 +111,7 @@
                 <input type="number" id="hosts" value="5" min="1" />
               </div>
               <div class="field">
-                <label title="Taxa de eventos da métrica. Usado para estimar a contribuição de tags efêmeras (regime 'Por requisição' ou 'Independente').">Requisições/hora</label>
+                <label title="Emissões da métrica por hora, por host. Para sistema total, divida pelo número de hosts. Esse valor define o teto de cardinalidade — você não pode ter mais timeseries únicas/hora do que emissões/hora.">Emissões/hora · host</label>
                 <input type="number" id="reqPerHour" value="50000" min="1" />
               </div>
             </div>

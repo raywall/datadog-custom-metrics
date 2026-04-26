@@ -181,6 +181,7 @@ O Agent Datadog adiciona tags automáticas (`host`, `env`, `service`, `version`,
 
 ### Boas práticas para evitar problemas
 
+- **Adotar uma convenção de nomenclatura clara**: prefixar todas as métricas customizadas com `custom.` e sufixar com o tipo da métrica (ex.: `custom.app.checkout.latency.distribution`). O prefixo torna trivial identificar métricas customizadas em queries de auditoria, RBAC por tag e configurações em massa de Metrics without Limits™. O sufixo torna explícito o multiplicador de billing aplicável (`.distribution` e `.histogram` carregam multiplicador 5×).
 - **Estimar a cardinalidade antes de instrumentar**: o produto cartesiano de todas as tags planejadas, multiplicado pelo multiplicador do tipo da métrica, multiplicado pelo número de hosts.
 - **Documentar cada métrica**: nome, propósito, tags esperadas, regime de variação por tag.
 - **Code review específico para mudanças em tags**: adicionar uma tag em uma métrica core nunca é "cosmético" — é mudança de billing.
@@ -356,41 +357,62 @@ A diferença HISTOGRAM × DISTRIBUTION é semântica e financeira:
 ### A fórmula completa
 
 ```
-C(M) = H × ∏ V(tᵢ_fixa) × ∏ rph(tᵢ_indep) × rph(grupo_per_req?) × M_tipo
+C(M) = H × min(rph, ∏ V(tᵢ_fixa) × ∏ rph(tᵢ_indep) × rph(grupo_per_req?)) × M_tipo
 ```
 
 Onde:
 - `H` = número de hosts
+- `rph` = emissões/hora **por host** da métrica
 - `∏ V(tᵢ_fixa)` = produto dos valores possíveis de cada tag bounded
 - `∏ rph(tᵢ_indep)` = produto de `rph` para cada tag independente unbounded
 - `rph(grupo_per_req?)` = um único `rph`, presente apenas se houver pelo menos uma tag per_request no conjunto
 - `M_tipo` = multiplicador do tipo (1× / 5× / 10×)
 
+#### O princípio do cap por taxa de eventos
+
+A função `min(rph, ...)` no centro da fórmula reflete um princípio matemático fundamental que muitos cálculos de cardinalidade ignoram:
+
+> **A cardinalidade por hora é limitada pelo número de emissões por hora.**
+
+Cada emissão da métrica produz exatamente **um** ponto, e esse ponto vai para exatamente **uma** timeseries (a definida pela combinação de tags daquela emissão). Se um host emite a métrica 5.000 vezes por hora, ele pode contribuir com no máximo 5.000 timeseries únicas naquela hora — independentemente de quantas tags ou valores possíveis a métrica tenha.
+
+A consequência prática é importante: **quando uma tag `per_request` (como `correlation_id`) está presente, ela já força toda emissão a ter uma tupla única**. Adicionar mais tags fixas (`region`, `endpoint`, `env`) não cria tuplas novas — só decora as tuplas existentes com mais dimensões. A cardinalidade fica colada no teto de `rph` por host.
+
+Sem o cap, a fórmula superestima cardinalidade em ordens de grandeza nos cenários mais comuns.
+
 #### Exemplos de aplicação
 
 **Caso A — métrica simples bounded:**
 ```
-hosts=5, env=3, region=4, status=10, métrica=COUNT
-C = 5 × 3 × 4 × 10 × 1 = 600 séries/hora
+hosts=5, env=3, region=4, status=10, rph=10000, métrica=COUNT
+
+Theoretical = 5 × 3 × 4 × 10 = 600
+Cap (rph por host) = 10.000 → não kicka (600 ≤ 10.000)
+C = 5 × 600 × 1 = 600 séries/hora
 ```
 
-**Caso B — caso real de banco (microsserviço de precificação):**
+**Caso B — caso real de banco (microsserviço de precificação), rph total = 20.833/h, 5 hosts:**
 ```
-hosts=5, rph=20.833 (500k/dia)
-tags: correlation_id, trace_id, price [todas per_request]
-      env=2, status=4 [bounded]
-métrica=DISTRIBUTION (5×)
+rph_per_host = 20.833 / 5 ≈ 4.167
+fixed: env=2, status=4 → ∏V = 8
+per_request: correlation_id, trace_id, price → grupo contribui 1× rph
+métrica = DISTRIBUTION (5×)
 
-Grupo per_request contribui: 1× rph = 20.833
-C = 5 × 2 × 4 × 20.833 × 5 = 4.166.600 séries/hora
-```
-
-Comparado ao cálculo errado (tratando as três per_request como independentes):
-```
-C_errado = 5 × 2 × 4 × 20.833³ × 5 ≈ 1,8 × 10¹⁴ séries/hora
+Theoretical_per_host = 8 × 4.167 = 33.336
+Cap (rph por host) = 4.167 → KICKA (33.336 > 4.167)
+Cardinality_per_host = 4.167
+C = 5 × 4.167 × 5 ≈ 104.175 séries/hora
 ```
 
-A correção do regime per_request reduz a estimativa em **~43 milhões de vezes** nesse caso. Esta é a diferença entre um cálculo realista e um pânico falso.
+A intuição: cada um dos 4.167 eventos por host gera uma única timeseries (forçada pela unicidade de `correlation_id`). As tags `env` e `status` apenas decoram essas tuplas com dimensões adicionais — não criam novas. Total: ~104k séries indexadas, perfeitamente absorvíveis em planos Enterprise com infraestrutura de tamanho razoável.
+
+**Comparação: o que aconteceria SEM o cap (cálculo errado):**
+```
+C_errado = 5 × 8 × 4.167 × 5 ≈ 833.400 séries/hora      ← multiplica fixed por rph
+C_muito_errado = 5 × 8 × 4.167³ × 5 ≈ 1,5 × 10¹³ séries  ← trata per_req como independentes
+```
+
+A diferença entre o cálculo correto e o "muito errado" (rph^3 sem cap) é de **~10⁸ vezes**. Daí muitas estimativas de capacidade darem números absurdamente catastróficos sem refletir o que de fato acontece.
 
 ### Allotments e overage
 
